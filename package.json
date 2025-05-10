@@ -1,0 +1,35 @@
+{
+  "name": "xo-server-webhook-vm-control",
+  "version": "1.0.0",
+  "license": "AGPL-3.0-or-later",
+  "description": "Control VMs via webhooks in Xen Orchestra",
+  "keywords": [
+    "webhook",
+    "vm",
+    "control",
+    "xo-server",
+    "plugin"
+  ],
+  "homepage": "https://github.com/vatesfr/xen-orchestra/tree/master/packages/xo-server-webhook-vm-control",
+  "bugs": "https://github.com/vatesfr/xen-orchestra/issues",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "cross-env NODE_ENV=production babel --source-maps --out-dir=dist/ src/",
+    "dev": "cross-env NODE_ENV=development babel --watch --source-maps --out-dir=dist/ src/",
+    "prebuild": "yarn run clean",
+    "predev": "yarn run clean",
+    "clean": "rimraf dist/"
+  },
+  "dependencies": {
+    "@xen-orchestra/log": "^0.6.0",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.16.0",
+    "@babel/core": "^7.16.0",
+    "@babel/preset-env": "^7.16.0",
+    "cross-env": "^7.0.3",
+    "rimraf": "^3.0.2"
+  },
+  "private": true
+}
