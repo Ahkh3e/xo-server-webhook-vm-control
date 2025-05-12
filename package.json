@@ -20,23 +20,24 @@
     "name": "Muhammad Khan",
     "url": "https://github.com/Ahkh3e/xo-server-webhook-vm-control.git"
   },
-  "preferGlobal": false,
-  "main": "dist/",
-  "engines": {
-    "node": ">=14"
-  },
+  "main": "dist/index.js",
   "scripts": {
-    "build": "babel --source-maps --out-dir=dist/ src/",
-    "dev": "babel --watch --source-maps --out-dir=dist/ src/",
-    "prepublish": "yarn run build"
+    "build": "cross-env NODE_ENV=production babel --source-maps --out-dir=dist/ src/",
+    "dev": "cross-env NODE_ENV=development babel --watch --source-maps --out-dir=dist/ src/",
+    "prebuild": "yarn run clean",
+    "predev": "yarn run clean",
+    "clean": "rimraf dist/"
   },
   "dependencies": {
-    "@xen-orchestra/log": "^0.6.0"
+    "@xen-orchestra/log": "^0.6.0",
+    "lodash": "^4.17.21"
   },
   "devDependencies": {
     "@babel/cli": "^7.17.0",
     "@babel/core": "^7.17.0",
-    "@babel/preset-env": "^7.16.11"
+    "@babel/preset-env": "^7.16.1",
+    "cross-env": "^7.0.3",
+    "rimraf": "^3.0.2"
   },
   "private": true
 }
