@@ -1,88 +1,163 @@
 # xo-server-webhook-vm-control
 
-> Control VMs via webhooks in Xen Orchestra using API keys
+Control VMs via webhooks in Xen Orchestra using API tokens or cookie authentication.
 
 ## Features
 
-- HTTP endpoint for VM control operations
-- Uses XO's native API key authentication
-- Supports start, stop, and restart operations
-- Configurable webhook path
-- Detailed logging and error handling
+- HTTP endpoints for VM control operations
+- Flexible authentication options:
+  - API token authentication
+  - Optional XO cookie authentication
+- Supports start, stop, reboot, and status operations
+- Detailed logging with @xen-orchestra/log
+- Comprehensive error handling with proper status codes
 
 ## Installation
 
 Like all other xo-server plugins, it can be configured directly via the web interface, see [the plugin documentation](https://xen-orchestra.com/docs/plugins.html).
 
-## Usage
+## Configuration
 
-### Authentication
+The plugin supports two configuration options:
 
-Use your XO API key in the Authorization header:
+1. **API Tokens**: List of tokens that are allowed to access the webhook endpoints
+2. **Allow Cookie Authentication**: Enable/disable XO cookie authentication for webhook endpoints (enabled by default)
+
+If no API tokens are configured, all token requests will be accepted (helpful during initial setup and testing).
+
+## Endpoints
+
+All endpoints are available under `/plugins/webhook-vm-control/`:
+
+1. Get VM Status:
+
+```
+GET /plugins/webhook-vm-control/status?id={vmId}
+```
+
+2. Start VM:
+
+```
+GET /plugins/webhook-vm-control/start?id={vmId}
+```
+
+3. Stop VM:
+
+```
+GET /plugins/webhook-vm-control/stop?id={vmId}
+```
+
+4. Reboot VM:
+
+```
+GET /plugins/webhook-vm-control/reboot?id={vmId}
+```
+
+## Authentication
+
+Two authentication methods are supported:
+
+### 1. API Token Authentication
+
+Use your configured API token in the Authorization header:
 
 ```bash
-Authorization: Bearer YOUR_XO_API_KEY
+Authorization: Bearer YOUR_API_TOKEN
 ```
 
-### Endpoints
+### 2. Cookie Authentication
 
-1. Start VM:
-```
-POST /vm/{vmId}/start
-```
+If enabled (default), you can use your XO session cookie for authentication.
 
-2. Stop VM:
-```
-POST /vm/{vmId}/stop
-Body: { "force": false }  // Optional
-```
+## Example Usage
 
-3. Get VM Status:
-```
-GET /vm/{vmId}/status
-```
+Get VM Status:
 
-### Example Usage
-
-Start a VM:
-```bash
-curl -X POST \
-  https://your-xo-server/api/v1/vm/your-vm-uuid/start \
-  -H 'Authorization: Bearer YOUR_XO_API_KEY'
-```
-
-Stop a VM (with force option):
-```bash
-curl -X POST \
-  https://your-xo-server/api/v1/vm/your-vm-uuid/stop \
-  -H 'Authorization: Bearer YOUR_XO_API_KEY' \
-  -H 'Content-Type: application/json' \
-  -d '{"force": true}'
-```
-
-Check VM Status:
 ```bash
 curl -X GET \
-  https://your-xo-server/api/v1/vm/your-vm-uuid/status \
-  -H 'Authorization: Bearer YOUR_XO_API_KEY'
+  'http://your-xo-server/plugins/webhook-vm-control/status?id=your-vm-uuid' \
+  -H 'Authorization: Bearer YOUR_API_TOKEN'
 ```
 
-### Responses
+Start a VM:
 
-Success Responses:
+```bash
+curl -X GET \
+  'http://your-xo-server/plugins/webhook-vm-control/start?id=your-vm-uuid' \
+  -H 'Authorization: Bearer YOUR_API_TOKEN'
+```
+
+Stop a VM:
+
+```bash
+curl -X GET \
+  'http://your-xo-server/plugins/webhook-vm-control/stop?id=your-vm-uuid' \
+  -H 'Authorization: Bearer YOUR_API_TOKEN'
+```
+
+Reboot a VM:
+
+```bash
+curl -X GET \
+  'http://your-xo-server/plugins/webhook-vm-control/reboot?id=your-vm-uuid' \
+  -H 'Authorization: Bearer YOUR_API_TOKEN'
+```
+
+## Responses
+
+### Success Responses
+
+Status Check:
+
 ```json
 {"status": "running"}  // For running VM
 {"status": "stopped"}  // For stopped VM
 ```
 
-Error Response:
+Start Operation:
+
 ```json
-{
-  "status": "error",
-  "message": "Error message here"
-}
+{ "status": "running" }
+```
+
+Stop Operation:
+
+```json
+{ "status": "stopped" }
+```
+
+Reboot Operation:
+
+```json
+{ "status": "rebooting" }
+```
+
+### Error Responses
+
+Missing VM ID:
+
+```json
+{ "error": "Missing VM ID" }
+```
+
+Invalid VM ID:
+
+```json
+{ "error": "Invalid VM ID: {vmId}" }
+```
+
+Operation Error:
+
+```json
+{ "error": "Failed to {action} VM" }
+```
+
+Authentication Error:
+
+```
+401 Unauthorized
 ```
 
 ## License
 
-AGPL-3.0-or-later © [Vates SAS](https://vates.fr)
+AGPL-3.0-or-later © [Ahkh3e](https://github.com/Ahkh3e)

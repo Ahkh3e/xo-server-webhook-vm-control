@@ -10,8 +10,12 @@
     "xo-server",
     "plugin"
   ],
-  "homepage": "https://github.com/vatesfr/xen-orchestra/tree/master/packages/xo-server-webhook-vm-control",
-  "bugs": "https://github.com/vatesfr/xen-orchestra/issues",
+  "homepage": "https://github.com/Ahkh3e/xo-server-webhook-vm-control",
+  "bugs": "https://github.com/Ahkh3e/xo-server-webhook-vm-control/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ahkh3e/xo-server-webhook-vm-control.git"
+  },
   "main": "dist/index.js",
   "scripts": {
     "build": "cross-env NODE_ENV=production babel --source-maps --out-dir=dist/ src/",

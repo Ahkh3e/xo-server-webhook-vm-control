@@ -1,108 +1,285 @@
-import { createLogger } from '@xen-orchestra/log'
+import { createLogger } from "@xen-orchestra/log";
 
-const log = createLogger('xo:webhook-vm-control')
+const log = createLogger("xo:webhook-vm-control");
+
+// Configuration schema to allow setting API tokens in the UI
+export const configurationSchema = {
+  type: "object",
+  properties: {
+    apiTokens: {
+      type: "array",
+      title: "API Tokens",
+      description:
+        "List of API tokens that are allowed to access the webhook endpoints",
+      items: {
+        type: "string",
+      },
+      default: [],
+    },
+    allowCookieAuth: {
+      type: "boolean",
+      title: "Allow Cookie Authentication",
+      description: "Allow using XO cookie authentication for webhook endpoints",
+      default: true,
+    },
+  },
+};
 
 class WebhookVMControl {
   constructor({ xo }) {
-    this._xo = xo
+    this.xo = xo;
+    this.apiTokens = new Set();
+    this.allowCookieAuth = true;
   }
 
-  load() {
-    // Register webhook endpoints
-    const routes = [
-      ['post', '/vm/:vmId/start', this.handleStart.bind(this)],
-      ['post', '/vm/:vmId/stop', this.handleStop.bind(this)],
-      ['get', '/vm/:vmId/status', this.handleStatus.bind(this)]
-    ]
+  configure(configuration) {
+    if (configuration?.apiTokens?.length) {
+      this.apiTokens = new Set(configuration.apiTokens);
+      log.info(`configured ${this.apiTokens.size} API tokens`);
+    } else {
+      this.apiTokens = new Set();
+      log.warning("no API tokens configured");
+    }
 
-    this._unregisterWebhooks = routes.map(([method, path, handler]) =>
-      this._xo.addRoute(method, path, handler)
-    )
+    this.allowCookieAuth = configuration?.allowCookieAuth !== false;
+    log.info(
+      `cookie authentication is ${
+        this.allowCookieAuth ? "enabled" : "disabled"
+      }`
+    );
+  }
+
+  async load() {
+    log.info("loading webhook vm control plugin");
+
+    this._unregisterHandlers = [
+      this.registerEndpoint("status", this.handleStatus),
+      this.registerEndpoint("start", this.handleStart),
+      this.registerEndpoint("stop", this.handleStop),
+      this.registerEndpoint("reboot", this.handleReboot),
+    ];
+
+    log.info("webhook vm control plugin loaded successfully");
   }
 
   unload() {
-    if (this._unregisterWebhooks) {
-      this._unregisterWebhooks.forEach(unregister => unregister())
+    log.info("unloading webhook vm control plugin");
+    if (this._unregisterHandlers) {
+      this._unregisterHandlers.forEach((handler) => handler());
     }
+    log.info("webhook vm control plugin unloaded successfully");
   }
 
-  async _validateAuth(req) {
-    const { token } = await this._xo.authenticateUser(req)
-    if (!token) {
-      throw new Error('Authentication required')
-    }
+  // Helper method for registering endpoints with consistent path structure
+  registerEndpoint(action, handler) {
+    return this.xo.registerHttpRequestHandler(
+      `/plugins/webhook-vm-control/${action}`,
+      async (req, res) => {
+        // Authentication handling
+        let isAuthenticated = false;
+
+        // Check for Bearer token authentication
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+          const token = authHeader.substring(7).trim();
+
+          if (this.apiTokens.size === 0) {
+            // If no tokens are configured, allow all token requests
+            // This helps during initial setup and testing
+            log.warn("no API tokens configured, accepting all token requests", {
+              action,
+            });
+            isAuthenticated = true;
+          } else if (this.apiTokens.has(token)) {
+            // Token exists in our configured tokens
+            isAuthenticated = true;
+            log.debug("authenticated via bearer token", { action });
+          } else {
+            // Invalid token
+            log.warn("unauthorized access attempt with invalid token", {
+              action,
+              ip: req.connection.remoteAddress,
+            });
+            res.status(401).send("Unauthorized");
+            return;
+          }
+        } else if (!this.allowCookieAuth) {
+          // No bearer token and cookie auth is disabled
+          log.warn("request without token and cookie auth disabled", {
+            action,
+            ip: req.connection.remoteAddress,
+          });
+          res.status(401).send("Unauthorized");
+          return;
+        }
+        // If we reach here with no Bearer token, we'll rely on XO's cookie auth
+
+        const { id } = req.query;
+        if (!id) {
+          res.status(400).json({ error: "Missing VM ID" });
+          return;
+        }
+
+        try {
+          const result = await handler.call(this, id);
+          res.json(result);
+        } catch (error) {
+          const status = error.status || 409;
+          const message = error.message || `Failed to ${action} VM`;
+          log.error(`${action} operation failed`, {
+            vmId: id,
+            error: message,
+            status,
+          });
+          res.status(status).json({ error: message });
+        }
+      }
+    );
   }
 
-  async _getVm(vmId) {
-    const vm = await this._xo.getObject(vmId)
-    if (!vm || vm.type !== 'VM') {
-      throw new Error(`Invalid VM ID: ${vmId}`)
-    }
-    return vm
+  // VM Status handler
+  async handleStatus(id) {
+    log.debug("status request received", { vmId: id });
+
+    const vm = await this.getVm(id);
+    const status =
+      vm.power_state?.toLowerCase() === "running" ? "running" : "stopped";
+
+    log.info("vm status check successful", {
+      vmId: id,
+      vmName: vm.name_label,
+      status,
+    });
+
+    return { status };
   }
 
-  async handleStart(req, res) {
+  // VM Start handler
+  async handleStart(id) {
+    log.debug("start request received", { vmId: id });
+
+    const vm = await this.getVm(id);
+
+    // Check if VM is already running
+    if (vm.power_state?.toLowerCase() === "running") {
+      log.info("vm already running, no action needed", {
+        vmId: id,
+        vmName: vm.name_label,
+      });
+      return { status: "running" };
+    }
+
+    log.info("starting vm", { vmId: id, vmName: vm.name_label });
+
     try {
-      await this._validateAuth(req)
-      const { vmId } = req.params
+      const xapi = this.xo.getXapi(vm.$pool);
+      await xapi.callAsync("VM.start", vm._xapiRef, false, false);
 
-      const vm = await this._getVm(vmId)
-      await this._xo.startVm(vmId)
+      log.info("vm started successfully", { vmId: id, vmName: vm.name_label });
 
-      log.debug('vm start successful', {
-        vmId,
-        userName: req.session?.user?.name
-      })
-
-      res.json({ status: 'running' })
+      return { status: "running" };
     } catch (error) {
-      log.error('vm start failed', { error: error.message })
-      res.status(error.status || 500).json({ status: 'error', message: error.message })
+      // Special handling for power state errors
+      if (
+        error.code === "VM_BAD_POWER_STATE" &&
+        error.params?.[2]?.toLowerCase() === "running"
+      ) {
+        log.info("vm is already running", { vmId: id, vmName: vm.name_label });
+        return { status: "running" };
+      }
+      throw error;
     }
   }
 
-  async handleStop(req, res) {
+  // VM Stop handler
+  async handleStop(id) {
+    log.debug("stop request received", { vmId: id });
+
+    const vm = await this.getVm(id);
+
+    // Check if VM is already stopped
+    if (vm.power_state?.toLowerCase() === "halted") {
+      log.info("vm already stopped, no action needed", {
+        vmId: id,
+        vmName: vm.name_label,
+      });
+      return { status: "stopped" };
+    }
+
+    log.info("stopping vm", { vmId: id, vmName: vm.name_label });
+
     try {
-      await this._validateAuth(req)
-      const { vmId } = req.params
-      const { force = false } = req.body
+      const xapi = this.xo.getXapi(vm.$pool);
+      // Using clean_shutdown for safer operation
+      await xapi.callAsync("VM.clean_shutdown", vm._xapiRef);
 
-      const vm = await this._getVm(vmId)
-      await this._xo.stopVm(vmId, force)
+      log.info("vm stopped successfully", { vmId: id, vmName: vm.name_label });
 
-      log.debug('vm stop successful', {
-        vmId,
-        userName: req.session?.user?.name
-      })
-
-      res.json({ status: 'stopped' })
+      return { status: "stopped" };
     } catch (error) {
-      log.error('vm stop failed', { error: error.message })
-      res.status(error.status || 500).json({ status: 'error', message: error.message })
+      // Special handling for power state errors
+      if (
+        error.code === "VM_BAD_POWER_STATE" &&
+        error.params?.[2]?.toLowerCase() === "halted"
+      ) {
+        log.info("vm is already halted", { vmId: id, vmName: vm.name_label });
+        return { status: "stopped" };
+      }
+      throw error;
     }
   }
 
-  async handleStatus(req, res) {
+  // VM Reboot handler
+  async handleReboot(id) {
+    log.debug("reboot request received", { vmId: id });
+
+    const vm = await this.getVm(id);
+
+    // Check if VM is halted - cannot reboot a stopped VM
+    if (vm.power_state?.toLowerCase() === "halted") {
+      const error = new Error(
+        "Cannot reboot a stopped VM. Start the VM first."
+      );
+      error.status = 400;
+      throw error;
+    }
+
+    log.info("rebooting vm", { vmId: id, vmName: vm.name_label });
+
+    const xapi = this.xo.getXapi(vm.$pool);
+    await xapi.callAsync("VM.clean_reboot", vm._xapiRef);
+
+    log.info("vm reboot initiated successfully", {
+      vmId: id,
+      vmName: vm.name_label,
+    });
+
+    return { status: "rebooting" };
+  }
+
+  // VM lookup helper
+  async getVm(vmId) {
+    log.debug("fetching vm details", { vmId });
+
     try {
-      await this._validateAuth(req)
-      const { vmId } = req.params
+      const vm = await this.xo.getObject(vmId);
 
-      const vm = await this._getVm(vmId)
-      const status = vm.power_state?.toLowerCase() === 'running' ? 'running' : 'stopped'
+      if (!vm || vm.type !== "VM") {
+        const error = new Error(`Invalid VM ID: ${vmId}`);
+        error.status = 404;
+        throw error;
+      }
 
-      log.debug('vm status check', {
-        vmId,
-        status,
-        userName: req.session?.user?.name
-      })
-
-      res.json({ status })
+      return vm;
     } catch (error) {
-      log.error('vm status check failed', { error: error.message })
-      res.status(error.status || 500).json({ status: 'error', message: error.message })
+      // Enhance error with appropriate status code if not set
+      if (!error.status) {
+        error.status = error.code === "ENOENT" ? 404 : 500;
+      }
+      throw error;
     }
   }
 }
 
-// Export plugin class
-export default opts => new WebhookVMControl(opts)
+// Export factory function
+export default (opts) => new WebhookVMControl(opts);
