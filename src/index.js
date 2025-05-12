@@ -210,8 +210,8 @@ class WebhookVMControl {
 
     try {
       const xapi = this.xo.getXapi(vm.$pool);
-      // Using clean_shutdown for safer operation
-      await xapi.callAsync("VM.clean_shutdown", vm._xapiRef);
+      // Using hard_shutdown to ensure VM stops immediately
+      await xapi.callAsync("VM.hard_shutdown", vm._xapiRef);
 
       log.info("vm stopped successfully", { vmId: id, vmName: vm.name_label });
 
@@ -247,7 +247,7 @@ class WebhookVMControl {
     log.info("rebooting vm", { vmId: id, vmName: vm.name_label });
 
     const xapi = this.xo.getXapi(vm.$pool);
-    await xapi.callAsync("VM.clean_reboot", vm._xapiRef);
+    await xapi.callAsync("VM.hard_reboot", vm._xapiRef);
 
     log.info("vm reboot initiated successfully", {
       vmId: id,
